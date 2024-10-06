@@ -1,0 +1,1 @@
+<textarea cols="50" rows="50" name="output">{{message}}</textarea>
