@@ -220,7 +220,7 @@ def postprocess_actions(imap : IMAPClient, uid : int, state : str) -> None:
     except Exception as error:
         log.error("Failed to execute postprocess action delete in state " + state + ": " + str(type(error)) + " - " + str(error))
 
-@route("/vehicle_status/listvehicles", method="GET")
+# @route("/vehicle_status/listvehicles", method="GET")
 def list_vehicles() -> str:
     try:
         response = requests.get(url=config["listEndpoint"], params={"accesskey":config["accesskey"]}, timeout=config["httpTimeout"])

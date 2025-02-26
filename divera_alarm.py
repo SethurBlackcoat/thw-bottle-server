@@ -141,14 +141,14 @@ def handle_alarm() -> HTTPResponse:
 
 	return HTTPResponse(status=200, body="OK")
 
-@route("/divera/debug/powerstatus", method="GET")
+# @route("/divera/debug/powerstatus", method="GET")
 def power_status() -> str:
 	global cec_controller
 	power_status = cec_controller.GetDevicePowerStatus(cec.CEC_DEVICE_TYPE_TV)
 	power_status_reliability : str = ": [" if config["trustReportedPowerStatus"] else " (unreliable!): ["
 	return "Reported power status" + power_status_reliability + cec_controller.PowerStatusToString(power_status) + " (" + str(power_status) + ")]"
 
-@route("/divera/debug/scan", method="GET")
+# @route("/divera/debug/scan", method="GET")
 def scan() -> str:
 	global cec_controller
 	print("requesting CEC bus information ...")
