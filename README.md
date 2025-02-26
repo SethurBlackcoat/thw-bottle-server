@@ -6,6 +6,8 @@ Das `divera_alarm` Modul kann bei einem einkommenden Divera-Alarm automatisch ei
 
 Das `divera_vehicle_status` Modul liest in einem Postfach ankommende Emails aus um STEIN Statusmeldung zu verarbeiten und die entsprechenden Fahrzeuge in Divera ebenfalls auf den respektiven Status zu setzen.
 
+Das `scheduled_maintenance` Modul ermöglicht es für die einzelnen Einheiten Aufgaben anzulegen welche regelmäßig wiederkehrend erledigt werden müssen (Akkus aufladen, Aggregate problelaufen lassen, etc.). Die anstehenden Aufgaben können auf einem Monitor angezeigt werden oder eine Divera-Benachrichtigung an eine pro Einheit hinterlegte Person auslösen, und mit einem einfachen Klick als erledigt markiert werden.
+
 Konfiguration zu den jeweiligen Modulen befindet sich im Ordner `config`, jeweils in der Datei `<modulname>.conf`.
 
 Weitere Module können einfach selbst erstellt werden: Das entsprechende Python-Skript in den Hauptordner legen, Konfigurationsdatei mit in den `config` Ordner, in die `main.conf` unter `modules` den Modulnamen hinzufügen und als aktiv markieren. Beim nächsten Start des Servers wird das Modul mitgeladen und initialisiert.
@@ -13,7 +15,7 @@ Weitere Module können einfach selbst erstellt werden: Das entsprechende Python-
 ## divera_alarm
 Das Modul initialisiert beim Start einen CEC Controller, mittels dem der Bildschirm angesteuert wird. Zum Debuggen kann die URL `/divera/debug/scan` einkommentiert werden indem in `divera_alarm.py` das `# ` vor der Zeile entfernt wird (sollte danach dann wieder auskommentiert werden). Über diese lässt sich dann mittels eines Webbrowsers das detektierte CEC-Netzwerk anzeigen. Es kann auf selber Weise die URL `/divera/debug/powerstatus` einkommentiert werden, welche den vom Bildschirm gemeldeten Zustand (angeschalten, anschaltend, ausschaltend, ausgeschalten, unbekannt) anzeigt.
 
-Die Hauptansteuerung findet via POST-Request an die URL `/divera/alarm` mit einer JSON-Nachricht statt. Das Format entspricht dem des Divera-Webhooks welcher in Divera unter `Verwaltung > Schnittstellen > Datenübergabe > Webhooks` mit dem Inhalt `Vollständiges Objekt` angelegt werden kann. Es wird zur Zeit allerdings lediglich das `title` Element ausgewertet. Das in der Konfiguration angelegte secret (siehe unten, Einstellung `secret` in `divera_alarm.conf`) muss als URL-Parameter angefügt sein (`/divera/alarm?secret=...`), sonst wird der Alarm ignoriert.
+Die Hauptansteuerung findet via POST-Request an die URL `/divera/alarm` mit einer JSON-Nachricht statt. Das Format entspricht dem des Divera-Webhooks welcher in Divera unter `Verwaltung > Schnittstellen > Datenübergabe > Webhooks` mit dem Inhalt `Vollständiges Objekt` angelegt werden kann. Es wird zur Zeit allerdings lediglich das `title` Element ausgewertet. Das in der Konfiguration angelegte secret (siehe unten, Einstellung `secret` in `divera_alarm.conf`) muss als URL-Parameter angefügt sein (`/divera/alarm?secret=...`), sonst wird der Request ignoriert.
 
 Zusätzlich existiert noch die URL `/divera/manual`, welche bei Zugriff via Webbrowser den aktuellen Zustand kurz zusammenfässt und eine einfache Oberfläche zum manuellen an-/ausschalten des Bildschirms anbietet. Die entsprechenden URLs `/divera/manual/on` und `/divera/manual/off` können zur externen Automatisierung auch direkt mit GET-Requests angesteuert werden.
 
@@ -21,6 +23,28 @@ Zusätzlich existiert noch die URL `/divera/manual`, welche bei Zugriff via Webb
 Das Modul verbindet sich beim Start mit dem konfigurierten Email-Postfach, ruft vorhandene ungelesene Emails ab, bearbeitet diese und geht dann in eine Ruhezustand (IMAP IDLE) in dem es darauf wartet von dem Emailserver benachrichtigt zu werden dass eine neue Email eingetroffen ist. Beim Erhalt einer solchen Nachricht werden wieder alle ungelesenen Emails abgerufen und bearbeitet. Um eine Mehrfachbearbeitung von Emails zu vermeiden müssen Emails nach dem bearbeiten entweder auf gelesen gesetzt, in einen anderen Ordner verschoben, und/oder gelöscht werden. Wie mit Emails unter bestimmten Umständen umgegangen werden soll lässt sich in der Konfiguration festlegen (siehe unten, Einstellung `imapPostProcess` in `divera_vehicle_status.conf`).
 
 Zum debuggen kann die URL `/vehicle_status/listvehicles` einkommentiert werden indem in `divera_vehicle_status.py` das `# ` vor der Zeile entfernt wird (sollte danach dann wieder auskommentiert werden). Über diese lässt sich dann mittels eines Webbrowsers eine Liste der in Divera hinterlegten Fahrzeuge inklusive deren Divera-ID anzeigen; die Divera-IDs werden für die Fahrzeugzuordnung zwischen STEIN und Divera benötigt (siehe unten, Einstallung `vehicleMapping` in `divera_vehicle_status.conf`).
+
+## scheduled_maintenance
+Das Modul ermöglicht es wiederkehrende Aufgaben wie z.B. regelmäßig Wartung zu hinterlegen und kurz vor deren Fälligkeit via Anzeige auf einem Monitor oder per Divera-Benachrichtigung informiert zu werden. Für jede Aufgabe können ein Name und eine optionalen Bemerkung hinterlegt werden, sowie das Datum der nächsten Fälligkeit, wie oft sie wiederholt werden soll, ab wann nach überschreiten der Fälligkeit sie als überfällig gilt, wie lange vor der Fälligkeit daran erinnert wird, und ob die Erinnerung per Anzeige und/oder Benachrichtigung geschehen soll. Die Option zur Benachrichtigung per Divera wird nur angezeigt wenn für die jeweilige Einheit ein Empfänger konfiguriert ist (siehe unten, Einstellung `units` in `scheduled_maintenance.conf`).
+
+Das Modul generiert automatisch eine Anzeige für alle konfigurierten Einheiten (siehe unten, Einstellung `units` in `scheduled_maintenance.conf`) und deren anstehende Aufgaben. Diese kann über die URL `/maintenance` via Webbrowser aufgerufen werden. Standardmäßig kommt man hier zur Vollansicht, welche alle Daten anzeigt (alle Einheiten, alle Aufgaben unabhängig deren Zustands). Mit dem Link `Kurzansicht` kommt man auf eine Variante in welcher nur bald fällige Aufgaben angezeigt werden. Der Link `Vollansicht` wechselt wieder auf die vorherige Ansicht zurück.
+
+Aufgaben werden pro Einheit immer in der Reihenfolge der nächsten Fälligkeit angezeigt; ihre Farbe zeigt an in welchem Zustand sie sind.
+* Grüne Aufgaben sind erledigt und stehen noch nicht wieder an.
+* Blaue Aufgaben befinden sich bereits innerhalb des Erinnerungszeitraums vor der Fälligkeit; wenn eine Divera-Benachrichtigung für sie konfiguriert ist wird oder wurde diese bereits verschickt.
+* Gelbe Aufgaben haben ihr Fälligkeitsdatum bereits erreicht, aber noch nicht das Überfälligkeitsdatum.
+* Rote Aufgaben sind überfällig.
+* Graue Aufgaben sind deaktiviert; sie werden weder in der Gesamtübersicht angezeigt noch werden für sie Benachrichtigungen verschickt, unabhängig ihrer Fälligkeit.
+
+Die Namen der Einheiten können angeklickt werden um zur Übersicht der Aufgaben dieser Einheit zu gelangen; dort werden immer alle Aufgaben der Einheit angezeigt. Hier können Aufgaben als erledigt markiert werden. Standardmäßig ist der aktuelle Tag ausgewählt, aber man kann die Erledigung auch rückdatieren. Mit einem Klick auf den Button `Erledigt` wird das nächste Fälligkeitsdatum auf den Tag gesetzt, welcher dem selektierte Erledigungsdatum plus der in der Aufgabe eingestellten Wiederholungsdauer entspricht. Ebenso können hier neue Aufgaben für die Einheit angelegt werden.
+
+Mit einem Klick auf eine Aufgabe, entweder von der Gesamtübersicht oder einer Einheitsübersicht, kann man die Aufgabe bearbeiten. Alle Daten können geändert, sowie die gesamte Aufgabe aktiviert/deaktiviert oder gelöscht werden.
+
+Zum Anlegen, Bearbeiten oder Löschen von Aufgaben muss das Bearbeitungspasswort eingegeben werden (siehe unten, `editPassword` in `scheduled_maintenance.conf`). Wenn dies einmal geschehen ist wird die Anmeldung im Browser gespeichert und muss fortan nicht mehr eingegeben werden. Sie kann durch löschen der cookies für die Seite wieder zurückgesetzt werden.  
+
+Mittels der URLs `/maintenance/overview/full/embed` bzw. `/maintenance/overview/concise/embed` können respektive die Vollansicht oder Kurzansicht in einen Divera-Monitor oder eine eigene Webseite zur Anzeige via iFrame eingebunden werden. Bei den embeds werden alle interaktiven Elemente (Link zum wechseln zwischen Voll- und Kurzansicht, klicken auf Einheiten und Aufgaben, Änderung des Mauszeigers) entfernt bzw. deaktiviert sowie der Hintergrund auf transparent gesetzt.
+
+Die URL `/maintenance/cron_notify` dient dem Auslösen der Divera-Benachrichtigung. Beim Aufruf dieser URL via POST-Request wird für Aufgaben, welche ihr Erinnerungsdatum erreicht haben, für deren Einheit ein Empfänger hinterlegt ist (siehe unten, Einstellung `units` in `scheduled_maintenance.conf`), für die ausgewählt ist dass die Erinnerung per Divera geschehen soll, und noch keine Benachrichtigung für dieses Fälligkeitsdatum verschickt wurde, eine Benachrichtigung an den hinterlegten Divera-Benutzer verschickt. Die Benachrichtigungen sind nur für den Empfänger sichtbar und werden nach einem konfigurierbaren Zeitraum (siehe unten, `archiveAfter` in `scheduled_maintenance.conf`) automatisch archiviert. Es empfiehlt sich diese URL automatisiert regelmäßig aufzurufen, z.B. einmal pro Tag via eines cron job mit `curl -X POST https://<hostname:port>/maintenance/cron_notify`.
 
 # Konfiguration
 ## Allgemein
@@ -72,10 +96,26 @@ Für alle Module sind Beispielkonfigurationen mitgeliefert. Diese befinden sich 
 * `logLevel`: Ab welchem Level dieses Modul Logmeldung weiterreichen soll. Loglevel sind `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
 * `logLevelImapclient`, `logLevelImaplib`, und `logLevelUrllib`: Ab welchem Level die Logmeldungen der entsprechenden verwendeten Libraries weitergereicht werden sollen. Loglevel sind `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
 
+## scheduled_maintenance.conf
+* **`units`**: Für welche Einheiten es möglich sein soll Aufgaben anzulegen. Pro Einheit kann zur Zeit der Fremdschlüssel eine Person hinterlegt werden welche für Aufgaben dieser Einheit, wenn konfiguriert, Erinnerungsmitteilungen per Divera erhält wenn eine Aufgabe fällig wird. Wenn keiner hinterlegt ist ist es für Aufgaben dieser Einheit nicht möglich die Option der Benachrichtigung auszuwählen. Fremdschlüssel können in Divera in der Benutzerverwaltung durch Bearbeiten des Benutzers unter `Extras` hinterlegt werden.
+* **`editPassword`**: Passwort das benötigt wird um Aufgaben anzulegen, zu ändern, und zu löschen. Nicht notwendig um eine Aufgabe als erledigt zu markieren. Es wird empfohlen das Passwort sehr einfach zu halten.
+* **`cookieSecret`**: Zeichenketten mit dem das Passwort im Browser automatisch verschlüsselt wird um nicht im Klartext auslesbar zu sein. Kann eine zufällige Zeichenkette sein, muss nie von Benutzern selbst eingegeben werden.
+* `refreshEmbed`: Dauer in Minuten nach dem sich die Übersichten im embed-Modus selbst neu aufrufen, um Änderungen anzuzeigen.
+* `notify`: Einstellungen zur Benachrichtigung via Divera
+  * `usersEndpoint`: API-URL zum Abruf der in Divera hinterlegten Benutzer. Sollte nur angepasst werden müssen falls Divera seine API ändert.
+  * `notifyEndpoint`: API-URL zum Versenden der Divera-Benachrichtigungen. Sollte nur angepasst werden müssen falls Divera seine API ändert.
+  * **`accesskey`**: Der Accesskey eines Divera-Systembenutzers welcher die Benachrichtigungen versendet (anlegen in Divera unter `Verwaltung > Schnittstellen > System-Benutzer`).
+  * `httpTimeout`: Dauer in Sekunden bis ein Versuch eine Benachrichtigung per Divera zu versenden fehlschlägt.
+  * `archiveAfter`: Dauer in Tagen bis eine Benachrichtigung automatisch archiviert wird.
+  * `json`: Struktur der an Divera zur Benachrichtigung übergebenen Daten. Sollte nur angepasst werden müssen falls Divera seine API ändert.
+* `logLevel`: Ab welchem Level dieses Modul Logmeldung weiterreichen soll. Loglevel sind `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
+* `logLevelUrllib`: Ab welchem Level die Logmeldungen der verwendeten Urllib-Library weitergereicht werden sollen. Loglevel sind `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
+
 # Dependencies
 * Python 3.10+
 
-## Python module (Installation via pip o.ä.)
+## Python packages (Installation via pip o.ä.)
+Werden nur benötigt wenn das jeweilige Modul aktiviert ist.
 ### Allgemein
 * bottle
 
@@ -85,3 +125,7 @@ Für alle Module sind Beispielkonfigurationen mitgeliefert. Diese befinden sich 
 
 ### divera_vehicle_status
 * IMAPClient
+
+### scheduled_maintenance
+* python-dateutil
+* simplejson
