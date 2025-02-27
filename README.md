@@ -1,14 +1,14 @@
 # Übersicht
 ## Allgemein
-Der Appserver besteht aus einzelnen Modulen, welche jeweils eine bestimmte Aufgabe übernehmen bzw. Dienst bereitstellen. Sie können einzeln aktiviert oder deaktiviert werden. Es gibt ein Grundmodul `main.py` welches das Logging konfiguriert, die anderen Module lädt und initialisiert, und den bottle-server selbst startet.
+Der Appserver wird gestartet indem man `main.py` mit Python ausführt. Er besteht aus einzelnen Modulen, welche jeweils eine bestimmte Aufgabe übernehmen bzw. Dienst bereitstellen und einzeln aktiviert oder deaktiviert werden können. Jedes Modul benötigt etwas an Konfiguration um es auf die OV-eigenen Daten anzupassen (siehe unten, Abschnitt `Konfiguration`), ohne dieser wird es nicht starten. Die Konfiguration zu den jeweiligen Modulen befindet sich im Ordner `config`, jeweils in der Datei `<modulname>.conf`.
+
+Das `main.py` Grundmodul konfiguriert das Logging, lädt und initialisiert die anderen Module, und startet den unterliegenden Webserver.
 
 Das `divera_alarm` Modul kann bei einem einkommenden Divera-Alarm automatisch einen angeschlossen Bildschirm anschalten bzw. auf seinen Input umschalten (via HDMI-CEC), um z.B. eine Übersicht mit Rückmeldungen anzuzeigen. Optional wird der Bildschirm nach einer einstellbaren Zeit auch wieder automatisch abgeschalten bzw. auf den vorherigen Input zurückgeschalten.
 
 Das `divera_vehicle_status` Modul liest in einem Postfach ankommende Emails aus um STEIN Statusmeldung zu verarbeiten und die entsprechenden Fahrzeuge in Divera ebenfalls auf den respektiven Status zu setzen.
 
 Das `scheduled_maintenance` Modul ermöglicht es für die einzelnen Einheiten Aufgaben anzulegen welche regelmäßig wiederkehrend erledigt werden müssen (Akkus aufladen, Aggregate problelaufen lassen, etc.). Die anstehenden Aufgaben können auf einem Monitor angezeigt werden oder eine Divera-Benachrichtigung an eine pro Einheit hinterlegte Person auslösen, und mit einem einfachen Klick als erledigt markiert werden.
-
-Konfiguration zu den jeweiligen Modulen befindet sich im Ordner `config`, jeweils in der Datei `<modulname>.conf`.
 
 Weitere Module können einfach selbst erstellt werden: Das entsprechende Python-Skript in den Hauptordner legen, Konfigurationsdatei mit in den `config` Ordner, in die `main.conf` unter `modules` den Modulnamen hinzufügen und als aktiv markieren. Beim nächsten Start des Servers wird das Modul mitgeladen und initialisiert.
 
@@ -22,7 +22,7 @@ Zusätzlich existiert noch die URL `/divera/manual`, welche bei Zugriff via Webb
 ## divera_vehicle_status
 Das Modul verbindet sich beim Start mit dem konfigurierten Email-Postfach, ruft vorhandene ungelesene Emails ab, bearbeitet diese und geht dann in eine Ruhezustand (IMAP IDLE) in dem es darauf wartet von dem Emailserver benachrichtigt zu werden dass eine neue Email eingetroffen ist. Beim Erhalt einer solchen Nachricht werden wieder alle ungelesenen Emails abgerufen und bearbeitet. Um eine Mehrfachbearbeitung von Emails zu vermeiden müssen Emails nach dem bearbeiten entweder auf gelesen gesetzt, in einen anderen Ordner verschoben, und/oder gelöscht werden. Wie mit Emails unter bestimmten Umständen umgegangen werden soll lässt sich in der Konfiguration festlegen (siehe unten, Einstellung `imapPostProcess` in `divera_vehicle_status.conf`).
 
-Zum debuggen kann die URL `/vehicle_status/listvehicles` einkommentiert werden indem in `divera_vehicle_status.py` das `# ` vor der Zeile entfernt wird (sollte danach dann wieder auskommentiert werden). Über diese lässt sich dann mittels eines Webbrowsers eine Liste der in Divera hinterlegten Fahrzeuge inklusive deren Divera-ID anzeigen; die Divera-IDs werden für die Fahrzeugzuordnung zwischen STEIN und Divera benötigt (siehe unten, Einstallung `vehicleMapping` in `divera_vehicle_status.conf`).
+Zum debuggen kann die URL `/vehicle_status/listvehicles` einkommentiert werden indem in `divera_vehicle_status.py` das `# ` vor der Zeile entfernt wird (sollte danach dann wieder auskommentiert werden). Über diese lässt sich dann mittels eines Webbrowsers eine Liste der in Divera hinterlegten Fahrzeuge inklusive deren Divera-ID anzeigen; die Divera-IDs werden für die Fahrzeugzuordnung zwischen STEIN und Divera benötigt (siehe unten, Einstellung `vehicleMapping` in `divera_vehicle_status.conf`).
 
 ## scheduled_maintenance
 Das Modul ermöglicht es wiederkehrende Aufgaben wie z.B. regelmäßig Wartung zu hinterlegen und kurz vor deren Fälligkeit via Anzeige auf einem Monitor oder per Divera-Benachrichtigung informiert zu werden. Für jede Aufgabe können ein Name und eine optionalen Bemerkung hinterlegt werden, sowie das Datum der nächsten Fälligkeit, wie oft sie wiederholt werden soll, ab wann nach überschreiten der Fälligkeit sie als überfällig gilt, wie lange vor der Fälligkeit daran erinnert wird, und ob die Erinnerung per Anzeige und/oder Benachrichtigung geschehen soll. Die Option zur Benachrichtigung per Divera wird nur angezeigt wenn für die jeweilige Einheit ein Empfänger konfiguriert ist (siehe unten, Einstellung `units` in `scheduled_maintenance.conf`).
@@ -48,14 +48,14 @@ Die URL `/maintenance/cron_notify` dient dem Auslösen der Divera-Benachrichtigu
 
 # Konfiguration
 ## Allgemein
-Für alle Module sind Beispielkonfigurationen mitgeliefert. Diese befinden sich im `config` Ordner mit dem Dateinamenpräfix `example_` vor dem Namen des entsprechenden Moduls. Um sie zu verwenden die Datei umbenennen oder kopieren, `example_` aus dem Dateinamen entfernen, und die Konfiguration mit den eigenen Einstellungen anpassen (Details zu spezifischen Modulen siehe unten).
+Für alle Module sind Beispielkonfigurationen mitgeliefert. Diese befinden sich im `config` Ordner mit dem Dateinamenpräfix `example_` vor dem Namen des entsprechenden Moduls. Um sie zu verwenden die Datei umbenennen oder kopieren, `example_` aus dem Dateinamen entfernen sodass der Name dem des Moduls gleicht, und die Konfiguration mit den OV-eigenen Daten anpassen (Details zu spezifischen Modulen siehe unten).
 
-**Fett** gedruckte Einstellungen müssen zwingend auf die eigenen Daten angepasst werden damit das Modul funktioniert. Gewisse Grundkenntnisse in der Funktionsweise und Konfiguration von Servern werden hier leider vorausgesetzt; eine volle Erklärung der Grundlagen würde den Rahmen sprengen. Es sollte aber selbst recht minimales Wissen ausreichen.  
+**Fett** gedruckte Einstellungen müssen zwingend auf die OV-eigenen Daten angepasst werden damit das Modul funktioniert. Gewisse Grundkenntnisse in der Funktionsweise und Konfiguration von Servern werden hier leider vorausgesetzt; eine volle Erklärung der Grundlagen würde den Rahmen sprengen. Es sollte aber selbst recht minimales Wissen ausreichen.  
 
 ## main.conf
-* `hostname` und `port`: Einstellungen auf welchem hostname und port der Server läuft. `0.0.0.0` entspricht IPv4; um unter IPv6 zu laufen ist als hostname `[::]` anzugeben. Der Server sollte entsprechend gängiger best practices nicht als root laufen; um einen Zugang via Port 80 (HTTP) oder 443 (HTTPS) zu ermöglichen sollte stattdessen eine reverse proxy vorgeschaltet werden.
+* `hostname` und `port`: Einstellungen auf welchem host und port der Server läuft. `0.0.0.0` entspricht IPv4; um unter IPv6 zu laufen ist `hostname` in eckigen Klammern anzugeben, z.B. `[::]`. Der Server sollte entsprechend gängiger best practices nicht als root laufen, stattdessen sollte eine reverse proxy vorgeschaltet werden um einen Zugang via Port 80 (HTTP) oder 443 (HTTPS) zu ermöglichen.
 * `keyfile` und `certfile`: Respektive private key und certificate für HTTPS-Verbindungen. Ein automatisches Zertifikatsmanagment via LetsEncrypt + certbot o.ä. ist empfohlen.
-* **`modules`**: Vorhandene Module und ob sie geladen werden sollen (`true`) oder nicht (`false`). In der Beispielkonfiguration sind standardmäßig alle deaktiviert; gewünschte als aktiv markieren. Es wird empfohlen dies schrittweise zu tun, um deren einzelne Konfigurationen testen zu können.
+* **`modules`**: Vorhandene Module und ob sie geladen werden sollen (`true`) oder nicht (`false`). In der Beispielkonfiguration sind standardmäßig alle deaktiviert; gewünschte als aktiv markieren. Es wird empfohlen dies initial schrittweise zu tun um die Modul-Konfigurationen einzeln testen zu können.
 * `logToConsole` und `logLevelConsole`: Ob Logausgaben auf die Konsole geleitet werden sollen und ab welchem Level. Loglevel sind `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
 * `logToFile`, `logLevelFile`, und `logfile`: Ob Logausgaben in eine Datei geschrieben werden sollen und ab welchem Level, sowie den Speicherort der Logdatei. Loglevel sind `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
 
