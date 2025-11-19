@@ -11,7 +11,7 @@
         <button type="submit" value="delete" class="delete">(<span style="text-decoration: underline;">Löschen</span>)</button>
     </form>
 </header>
-<form action="/maintenance/unit/{{unit}}/task/{{task}}" method="post">
+<form action="/maintenance/unit/{{unit}}/task/{{task}}/edit" method="post">
     <table class="t_tasks" style="margin-top: 20px;">
         <tr>
             <td class="td_edit">

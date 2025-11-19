@@ -37,7 +37,7 @@
         id = task["Id"]
         task_state = "task_inactive" if not task["Active"] else "task_overdue" if today >= task["OverdueDate"] else "task_due" if today >= task["DueDate"] else "task_notify" if today >= task["NotifyDate"] else "task_done"
     %>
-        <div class="tasks_item" {{!"" if embed else f"onclick=\"window.location.href='/maintenance/unit/{unit}/task/{id}'\""}}>
+        <div class="tasks_item" {{!"" if embed else f"onclick=\"window.location.href='/maintenance/unit/{unit}/task/{id}/view'\""}}>
             <div class="tasks_element {{task_state}}">
                 <div>
                     <div class="task_name">

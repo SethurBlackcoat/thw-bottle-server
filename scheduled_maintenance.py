@@ -218,18 +218,26 @@ def save_created_task(unit : str) -> str:
     response.set_header("Location", f"/maintenance/unit/{unit}")
     return "Creation successful, redirecting..."
 
-@route("/maintenance/unit/<unit>/task/<task:int>", method="GET")
+@route("/maintenance/unit/<unit>/task/<task:int>/view", method="GET")
 @validate_unit
-@require_auth(redirect_location="/maintenance/unit/{unit}/task/{task}")
+def view_task(unit : str, task : int) -> str:
+    with db_lock:
+        row = db.execute("SELECT Active, Name, Description, DueDate, OverdueDate, NotifyDate FROM Tasks WHERE Id = ?", (task,)).fetchone()
+    response.set_cookie("return-to", f"/maintenance/unit/{unit}/task/{task}/view", path="/maintenance", samesite="lax")
+    return template("templates/maintenance/view_task.tpl", unit=unit, id=task, task=row, notify_receiver=get_notify_receiver(unit)["Name"]) 
+
+@route("/maintenance/unit/<unit>/task/<task:int>/edit", method="GET")
+@validate_unit
+@require_auth(redirect_location="/maintenance/unit/{unit}/task/{task}/edit")
 def edit_task(unit : str, task : int) -> str:
     with db_lock:
         row = db.execute("SELECT Active, Name, Description, DueDate, NotifyDate, OverdueDate, RepeatOffset, NotifyOffset, OverdueOffset, NotifyShow, NotifyMessage FROM Tasks WHERE Id = ?", (task,)).fetchone()
     return template("templates/maintenance/edit_task.tpl", unit=unit, task=task, row=row, notify_receiver=get_notify_receiver(unit)["Name"]) 
 
-@route("/maintenance/unit/<unit>/task/<task:int>", method="POST")
+@route("/maintenance/unit/<unit>/task/<task:int>/edit", method="POST")
 @validate_unit
 @catch_forms_exceptions
-@require_auth(redirect_location="/maintenance/unit/{unit}/task/{task}")
+@require_auth(redirect_location="/maintenance/unit/{unit}/task/{task}/edit")
 def save_edited_task(unit : str, task : int) -> str:
     dueDate = date.fromisoformat(request.forms.DueDate)
     repeat_offset : str = f"{request.forms.RepeatValue} {request.forms.RepeatUnit}"
@@ -312,7 +320,6 @@ def redirect_to_return_location() -> str:
 def init() -> None:
     global db
     global db_lock
-    global receiver_cache
     global use_notify
     log.info("Initializing " + __name__.strip("_"))
 

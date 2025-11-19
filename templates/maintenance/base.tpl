@@ -119,6 +119,13 @@
             button.delete:hover {
                 color: red;
             }
+            button.edit {
+                font-weight: bold;
+                color: #AAA;
+            }
+            button.edit:hover {
+                color: white;
+            }
             textarea {
                 font-size: 0.8em;
                 line-height: 1.05em;
