@@ -31,10 +31,15 @@
             </td>
             <td class="td_edit">
                 <div class="table_centered">
-                    <label for="DueDate">Nächste Fälligkeit</label>
+                    <label for="TaskType">Aufgabenart</label>
                 </div>
             </td>
             <td class="td_edit">
+                <div class="table_centered">
+                    <label for="DueDate">Nächste Fälligkeit</label>
+                </div>
+            </td>
+            <td class="td_edit" id="RepeatHeader">
                 <div class="table_centered">
                     <label for="RepeatOffset">Wiederholen alle</label>
                 </div>
@@ -73,14 +78,23 @@
             </td>
             <td class="td_edit">
                 <div class="table_centered">
-                    <input type="date" name="DueDate" id="DueDate" value="{{row['DueDate']}}" required>
+                    <select name="TaskType" id="TaskType">
+                        <option value="recurring" {{"selected" if row["TaskType"] == "recurring" else ""}}>Wiederkehrend</option>
+                        <option value="one_time" {{"selected" if row["TaskType"] == "one_time" else ""}}>Einmalig</option>
+                    </select>
                 </div>
             </td>
             <td class="td_edit">
                 <div class="table_centered">
+                    <input type="date" name="DueDate" id="DueDate" value="{{row['DueDate']}}" required>
+                </div>
+            </td>
+            <td class="td_edit" id="RepeatFields">
+                <div class="table_centered">
                     % v, u = row["RepeatOffset"].split(" ")
-                    <input type="number" name="RepeatValue" id="RepeatOffset" value="{{v}}" min="1" size="2" required style="text-align: center;">
-                    <select name="RepeatUnit" required style="margin-left: 5px;">
+                    % repeat_value = v if row["TaskType"] == "recurring" else "1"
+                    <input type="number" name="RepeatValue" id="RepeatOffset" value="{{repeat_value}}" min="1" size="2" required style="text-align: center;">
+                    <select name="RepeatUnit" id="RepeatUnit" required style="margin-left: 5px;">
                         <option value="days" {{"selected" if u == "days" else ""}}>Tage</option>
                         <option value="weeks" {{"selected" if u == "weeks" else ""}}>Wochen</option>
                         <option value="months" {{"selected" if u == "months" else ""}}>Monate</option>
@@ -138,8 +152,8 @@
             </td>
         </tr>
         <tr>
-            <td colspan="4" class="td_edit"></td>
-            <td class="td_edit">
+            <td colspan="5" class="td_edit"></td>
+            <td class="td_edit" id="RepeatExplanation">
                 <div class="table_centered">
                     <label for="RepeatOffset">nach Erledigung</label>
                 </div>
@@ -156,7 +170,7 @@
             </td>
         </tr>
         <tr>
-            <td colspan="8" class="td_edit">
+            <td colspan="9" class="td_edit">
                 <div class="table_centered">
                     <input value="Speichern" type="submit" style="margin-top: 20px;"/>
                 </div>
@@ -164,3 +178,15 @@
         </tr>
     </table>
 </form>
+<script>
+    function toggleRepeatFields() {
+        const recurring = document.getElementById("TaskType").value === "recurring";
+        document.getElementById("RepeatOffset").disabled = !recurring;
+        document.getElementById("RepeatUnit").disabled = !recurring;
+        document.getElementById("RepeatHeader").hidden = !recurring;
+        document.getElementById("RepeatFields").hidden = !recurring;
+        document.getElementById("RepeatExplanation").hidden = !recurring;
+    }
+    document.getElementById("TaskType").addEventListener("change", toggleRepeatFields);
+    toggleRepeatFields();
+</script>

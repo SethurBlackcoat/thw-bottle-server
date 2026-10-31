@@ -1,5 +1,5 @@
 % rebase("./templates/maintenance/base.tpl", title="Übersicht")
-% from datetime import date
+% from datetime import date, datetime
 % today = date.today()
 <header class="page_header">
 % if embed:
@@ -35,7 +35,7 @@
     <%
         for task in tasks[unit]:
         id = task["Id"]
-        task_state = "task_inactive" if not task["Active"] else "task_overdue" if today >= task["OverdueDate"] else "task_due" if today >= task["DueDate"] else "task_notify" if today >= task["NotifyDate"] else "task_done"
+        task_state = "task_done" if task["CompletedAt"] is not None else "task_inactive" if not task["Active"] else "task_overdue" if today >= task["OverdueDate"] else "task_due" if today >= task["DueDate"] else "task_notify" if today >= task["NotifyDate"] else "task_done"
     %>
         <div class="tasks_item" {{!"" if embed else f"onclick=\"window.location.href='/maintenance/unit/{unit}/task/{id}/view'\""}}>
             <div class="tasks_element {{task_state}}">
@@ -45,12 +45,15 @@
                     </div>
                     <div class="task_desc">
                         {{task["Description"]}}
+                        % if task["CompletedAt"] is not None:
+                        <br>Abgeschlossen – wird endgültig gelöscht am {{datetime.fromtimestamp(task["DeleteAfter"]).strftime("%d.%m.%Y %H:%M")}}
+                        % end
                     </div>
                 </div>
             </div>
             <div class="tasks_element date {{task_state}}" style="display:flex; align-items:center; justify-content: right;">
                 <div>
-                    {{task["DueDate"].strftime("%d.%m.%Y")}}
+                    {{datetime.fromtimestamp(task["DeleteAfter"]).strftime("%d.%m.%Y %H:%M") if task["CompletedAt"] is not None else task["DueDate"].strftime("%d.%m.%Y")}}
                 </div>
             </div>
         </div>

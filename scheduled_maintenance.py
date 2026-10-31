@@ -1,7 +1,7 @@
 from logging import Logger
 from common import load_config, get_logger
 from sqlite3 import Connection, register_adapter, register_converter, connect, Row, PARSE_DECLTYPES
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from bottle import route, template, HTTPError, request, response, redirect
 from functools import wraps
@@ -44,7 +44,9 @@ def catch_forms_exceptions(fn : Callable[[str], str]) -> Callable[[], str]:
         try:
             return fn(*args, **kwargs)
         except KeyError as error:
-            return f"Error with form parameter: {str(error)}"
+            return HTTPError(400, f"Fehlender Formularwert: {str(error)}")
+        except (TypeError, ValueError) as error:
+            return HTTPError(400, f"Ungültiger Formularwert: {str(error)}")
         except Exception as error:
             return f"Error: {str(type(error))} - {str(error)}"
     return catch_exceptions
@@ -58,6 +60,26 @@ def adapt_date_iso(date : date) -> str:
 
 def convert_date(value : bytes) -> date:
     return date.fromisoformat(value.decode())
+
+def migrate_database() -> None:
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(Tasks)").fetchall()}
+    if "TaskType" not in columns:
+        db.execute("ALTER TABLE Tasks ADD COLUMN TaskType TEXT NOT NULL DEFAULT 'recurring'")
+    if "CompletedAt" not in columns:
+        db.execute("ALTER TABLE Tasks ADD COLUMN CompletedAt INTEGER")
+    if "DeleteAfter" not in columns:
+        db.execute("ALTER TABLE Tasks ADD COLUMN DeleteAfter INTEGER")
+    db.execute("UPDATE Tasks SET TaskType = 'recurring' WHERE TaskType IS NULL OR TaskType = ''")
+
+def get_form_offset(forms, prefix : str, allow_zero : bool) -> str:
+    value = int(forms[f"{prefix}Value"])
+    unit = forms[f"{prefix}Unit"]
+    if unit not in ("days", "weeks", "months", "years") or value < (0 if allow_zero else 1):
+        raise ValueError(f"Ungültiges Intervall: {prefix}")
+    return f"{value} {unit}"
+
+def task_not_expired_sql() -> str:
+    return "(DeleteAfter IS NULL OR DeleteAfter > CAST(strftime('%s', 'now') AS INTEGER))"
 
 def get_notify_receiver(unit : str) -> dict[str, str]:
     if receiver_cache is None:
@@ -161,7 +183,7 @@ def overview(concise = False, embed = False) -> str:
     due_tasks : dict[str, list[Row]] = {}
     with db_lock:
         for unit in config["units"]:
-            due_tasks[unit] = db.execute(f"SELECT Id, Active, Name, Description, DueDate, NotifyDate, OverdueDate FROM Tasks WHERE Active = 1 AND Unit = ? {'AND (date() >= DueDate OR (NotifyShow = 1 AND date() >= NotifyDate))' if concise else ''} ORDER BY DueDate ASC", (unit,)).fetchall()
+            due_tasks[unit] = db.execute(f"SELECT Id, Active, Name, Description, DueDate, NotifyDate, OverdueDate, TaskType, CompletedAt, DeleteAfter FROM Tasks WHERE Unit = ? AND {task_not_expired_sql()} AND (Active = 1 OR (TaskType = 'one_time' AND CompletedAt IS NOT NULL)) {'AND (CompletedAt IS NOT NULL OR date() >= DueDate OR (NotifyShow = 1 AND date() >= NotifyDate))' if concise else ''} ORDER BY (CompletedAt IS NOT NULL) DESC, DueDate ASC", (unit,)).fetchall()
 
     return template("templates/maintenance/overview.tpl", tasks=due_tasks, concise=concise, embed=embed, refresh=config["refreshEmbed"] * 60 * 1000)
 
@@ -192,7 +214,7 @@ def overview_concise_embed() -> str:
 @validate_unit
 def show_unit(unit : str) -> str:
     with db_lock:
-        unit_tasks = db.execute("SELECT Id, Active, Name, Description, DueDate, NotifyDate, OverdueDate, NotifyShow, NotifyMessage FROM Tasks WHERE Unit = ? ORDER BY Active DESC, DueDate ASC", (unit,))
+        unit_tasks = db.execute(f"SELECT Id, Active, Name, Description, DueDate, NotifyDate, OverdueDate, NotifyShow, NotifyMessage, TaskType, CompletedAt, DeleteAfter FROM Tasks WHERE Unit = ? AND {task_not_expired_sql()} ORDER BY (CompletedAt IS NOT NULL) DESC, Active DESC, DueDate ASC", (unit,)).fetchall()
     response.set_cookie("return-to", f"/maintenance/unit/{unit}", path="/maintenance", samesite="lax")
     return template("templates/maintenance/unit.tpl", unit=unit, tasks=unit_tasks)
 
@@ -208,12 +230,15 @@ def create_task(unit : str) -> str:
 @require_auth(redirect_location="/maintenance/unit/{unit}/new")
 def save_created_task(unit : str) -> str:
     due_date : date = date.fromisoformat(request.forms.DueDate)
-    repeat_offset : str = f"{request.forms.RepeatValue} {request.forms.RepeatUnit}"
-    notify_offset : str = f"{request.forms.NotifyValue} {request.forms.NotifyUnit}"
-    overdue_offset : str = f"{request.forms.OverdueValue} {request.forms.OverdueUnit}"
+    task_type = request.forms.get("TaskType", "recurring")
+    if task_type not in ("recurring", "one_time"):
+        return HTTPError(400, "Ungültiger Aufgabentyp")
+    repeat_offset : str = get_form_offset(request.forms, "Repeat", allow_zero=False) if task_type == "recurring" else "0 days"
+    notify_offset : str = get_form_offset(request.forms, "Notify", allow_zero=True)
+    overdue_offset : str = get_form_offset(request.forms, "Overdue", allow_zero=True)
     with db_lock:
-        db.execute("INSERT INTO Tasks (Unit, Name, Description, DueDate, NotifyDate, OverdueDate, RepeatOffset, NotifyOffset, OverdueOffset, NotifyShow, NotifyMessage) VALUES (:unit, :name, :description, :dueDate, :notifyDate, :overdueDate, :repeatOffset, :notifyOffset, :overdueOffset, :notifyShow, :notifyMessage)", 
-                {"unit": unit, "name": request.forms.Name, "description": request.forms.Description, "dueDate": due_date, "notifyDate": due_date - parse_relativedelta(notify_offset), "overdueDate": due_date + parse_relativedelta(overdue_offset), "repeatOffset": repeat_offset, "notifyOffset": notify_offset, "overdueOffset": overdue_offset, "notifyShow": "NotifyShow" in request.forms, "notifyMessage": "NotifyMessage" in request.forms})
+        db.execute("INSERT INTO Tasks (Unit, Name, Description, DueDate, NotifyDate, OverdueDate, RepeatOffset, NotifyOffset, OverdueOffset, NotifyShow, NotifyMessage, TaskType) VALUES (:unit, :name, :description, :dueDate, :notifyDate, :overdueDate, :repeatOffset, :notifyOffset, :overdueOffset, :notifyShow, :notifyMessage, :taskType)",
+            {"unit": unit, "name": request.forms.Name, "description": request.forms.Description, "dueDate": due_date, "notifyDate": due_date - parse_relativedelta(notify_offset), "overdueDate": due_date + parse_relativedelta(overdue_offset), "repeatOffset": repeat_offset, "notifyOffset": notify_offset, "overdueOffset": overdue_offset, "notifyShow": "NotifyShow" in request.forms, "notifyMessage": "NotifyMessage" in request.forms, "taskType": task_type})
     response.status = 303
     response.set_header("Location", f"/maintenance/unit/{unit}")
     return "Creation successful, redirecting..."
@@ -222,7 +247,9 @@ def save_created_task(unit : str) -> str:
 @validate_unit
 def view_task(unit : str, task : int) -> str:
     with db_lock:
-        row = db.execute("SELECT Active, Name, Description, DueDate, OverdueDate, NotifyDate FROM Tasks WHERE Id = ?", (task,)).fetchone()
+        row = db.execute(f"SELECT Active, Name, Description, DueDate, OverdueDate, NotifyDate, TaskType, CompletedAt, DeleteAfter FROM Tasks WHERE Id = ? AND Unit = ? AND {task_not_expired_sql()}", (task, unit)).fetchone()
+    if row is None:
+        return HTTPError(404, "Aufgabe nicht gefunden")
     response.set_cookie("return-to", f"/maintenance/unit/{unit}/task/{task}/view", path="/maintenance", samesite="lax")
     return template("templates/maintenance/view_task.tpl", unit=unit, id=task, task=row, notify_receiver=get_notify_receiver(unit)["Name"]) 
 
@@ -231,7 +258,11 @@ def view_task(unit : str, task : int) -> str:
 @require_auth(redirect_location="/maintenance/unit/{unit}/task/{task}/edit")
 def edit_task(unit : str, task : int) -> str:
     with db_lock:
-        row = db.execute("SELECT Active, Name, Description, DueDate, NotifyDate, OverdueDate, RepeatOffset, NotifyOffset, OverdueOffset, NotifyShow, NotifyMessage FROM Tasks WHERE Id = ?", (task,)).fetchone()
+        row = db.execute(f"SELECT Active, Name, Description, DueDate, NotifyDate, OverdueDate, RepeatOffset, NotifyOffset, OverdueOffset, NotifyShow, NotifyMessage, TaskType, CompletedAt, DeleteAfter FROM Tasks WHERE Id = ? AND Unit = ? AND {task_not_expired_sql()}", (task, unit)).fetchone()
+    if row is None:
+        return HTTPError(404, "Aufgabe nicht gefunden")
+    if row["CompletedAt"] is not None:
+        return HTTPError(409, "Abgeschlossene Einmalaufgaben können nicht bearbeitet werden")
     return template("templates/maintenance/edit_task.tpl", unit=unit, task=task, row=row, notify_receiver=get_notify_receiver(unit)["Name"]) 
 
 @route("/maintenance/unit/<unit>/task/<task:int>/edit", method="POST")
@@ -240,12 +271,15 @@ def edit_task(unit : str, task : int) -> str:
 @require_auth(redirect_location="/maintenance/unit/{unit}/task/{task}/edit")
 def save_edited_task(unit : str, task : int) -> str:
     dueDate = date.fromisoformat(request.forms.DueDate)
-    repeat_offset : str = f"{request.forms.RepeatValue} {request.forms.RepeatUnit}"
-    notify_offset : str = f"{request.forms.NotifyValue} {request.forms.NotifyUnit}"
-    overdue_offset : str = f"{request.forms.OverdueValue} {request.forms.OverdueUnit}"
+    task_type = request.forms.get("TaskType", "recurring")
+    if task_type not in ("recurring", "one_time"):
+        return HTTPError(400, "Ungültiger Aufgabentyp")
+    repeat_offset : str = get_form_offset(request.forms, "Repeat", allow_zero=False) if task_type == "recurring" else "0 days"
+    notify_offset : str = get_form_offset(request.forms, "Notify", allow_zero=True)
+    overdue_offset : str = get_form_offset(request.forms, "Overdue", allow_zero=True)
     with db_lock:
-        db.execute("UPDATE Tasks SET Active = :active, Name = :name, Description = :description, DueDate = :dueDate, NotifyDate = :notifyDate, OverdueDate = :overdueDate, RepeatOffset = :repeatOffset, NotifyOffset = :notifyOffset, OverdueOffset = :overdueOffset, NotifyShow = :notifyShow, NotifyMessage = :notifyMessage, MessageSent = :messageSent WHERE Id = :id", 
-                {"id": task, "active": "TaskActive" in request.forms, "name": request.forms.Name, "description": request.forms.Description, "dueDate": dueDate, "notifyDate": dueDate - parse_relativedelta(notify_offset), "overdueDate": dueDate + parse_relativedelta(overdue_offset), "repeatOffset": repeat_offset, "notifyOffset": notify_offset, "overdueOffset": overdue_offset, "notifyShow": "NotifyShow" in request.forms, "notifyMessage": "NotifyMessage" in request.forms, "messageSent": 0})
+        db.execute("UPDATE Tasks SET Active = :active, Name = :name, Description = :description, DueDate = :dueDate, NotifyDate = :notifyDate, OverdueDate = :overdueDate, RepeatOffset = :repeatOffset, NotifyOffset = :notifyOffset, OverdueOffset = :overdueOffset, NotifyShow = :notifyShow, NotifyMessage = :notifyMessage, MessageSent = :messageSent, TaskType = :taskType WHERE Id = :id AND Unit = :unit AND CompletedAt IS NULL",
+            {"id": task, "unit": unit, "active": "TaskActive" in request.forms, "name": request.forms.Name, "description": request.forms.Description, "dueDate": dueDate, "notifyDate": dueDate - parse_relativedelta(notify_offset), "overdueDate": dueDate + parse_relativedelta(overdue_offset), "repeatOffset": repeat_offset, "notifyOffset": notify_offset, "overdueOffset": overdue_offset, "notifyShow": "NotifyShow" in request.forms, "notifyMessage": "NotifyMessage" in request.forms, "messageSent": 0, "taskType": task_type})
     response.status = 303
     response.set_header("Location", "/maintenance")
     return "Edit successful, redirecting..."
@@ -254,11 +288,28 @@ def save_edited_task(unit : str, task : int) -> str:
 @validate_unit
 @catch_forms_exceptions
 def mark_task_done(unit : str, task : int) -> str:
+    try:
+        done_date = date.fromisoformat(request.forms.DoneDate)
+    except (KeyError, TypeError, ValueError):
+        return HTTPError(400, "Ungültiges Erledigungsdatum")
+    if done_date > date.today():
+        return HTTPError(400, "Das Erledigungsdatum darf nicht in der Zukunft liegen")
     with db_lock:
-        row = db.execute("SELECT RepeatOffset, NotifyOffset, OverdueOffset FROM Tasks WHERE Id = ?", (task,)).fetchone()
-        new_due_date = date.fromisoformat(request.forms.DoneDate) + parse_relativedelta(row["RepeatOffset"])
-        db.execute("UPDATE Tasks SET DueDate = :dueDate, NotifyDate = :notifyDate, OverdueDate = :overdueDate, MessageSent = :messageSent WHERE Id = :id", 
-                {"id": task, "dueDate": new_due_date, "notifyDate": new_due_date - parse_relativedelta(row["NotifyOffset"]), "overdueDate": new_due_date + parse_relativedelta(row["OverdueOffset"]), "messageSent": 0})
+        row = db.execute("SELECT TaskType, CompletedAt, RepeatOffset, NotifyOffset, OverdueOffset FROM Tasks WHERE Id = ? AND Unit = ?", (task, unit)).fetchone()
+        if row is None:
+            return HTTPError(404, "Aufgabe nicht gefunden")
+        if row["CompletedAt"] is not None:
+            return HTTPError(409, "Aufgabe ist bereits abgeschlossen")
+        if row["TaskType"] == "one_time":
+            completed_at = datetime.now().replace(microsecond=0)
+            delete_after = int((completed_at + timedelta(days=3)).timestamp())
+            cursor = db.execute("UPDATE Tasks SET CompletedAt = ?, DeleteAfter = ?, MessageSent = 1 WHERE Id = ? AND Unit = ? AND CompletedAt IS NULL", (int(completed_at.timestamp()), delete_after, task, unit))
+        else:
+            new_due_date = done_date + parse_relativedelta(row["RepeatOffset"])
+            cursor = db.execute("UPDATE Tasks SET DueDate = :dueDate, NotifyDate = :notifyDate, OverdueDate = :overdueDate, MessageSent = :messageSent WHERE Id = :id AND Unit = :unit AND CompletedAt IS NULL",
+                    {"id": task, "unit": unit, "dueDate": new_due_date, "notifyDate": new_due_date - parse_relativedelta(row["NotifyOffset"]), "overdueDate": new_due_date + parse_relativedelta(row["OverdueOffset"]), "messageSent": 0})
+        if cursor.rowcount != 1:
+            return HTTPError(409, "Aufgabe wurde zwischenzeitlich geändert")
     response.status = 303
     response.set_header("Location", f"/maintenance/unit/{unit}")
     return "Complete successful, redirecting..."
@@ -268,7 +319,7 @@ def mark_task_done(unit : str, task : int) -> str:
 @require_auth(redirect_location="/maintenance/unit/{unit}/task/{task}")
 def delete_task(unit : str, task : int) -> str:
     with db_lock:
-        db.execute("DELETE FROM Tasks WHERE ID = ?", (task,))
+        db.execute("DELETE FROM Tasks WHERE ID = ? AND Unit = ?", (task, unit))
     response.status = 303
     response.set_header("Location", f"/maintenance/unit/{unit}")
     return "Deletion successful, redirecting..."
@@ -295,7 +346,8 @@ def process_auth() -> str:
 @route("/maintenance/cron_notify", method="POST")
 def cron_notify() -> str:
     with db_lock:
-        rows = db.execute("SELECT Id, Unit, Name, Description, DueDate, NotifyShow FROM Tasks WHERE Active = 1 AND NotifyMessage = 1 AND MessageSent = 0 AND date() >= NotifyDate").fetchall()
+        db.execute("DELETE FROM Tasks WHERE TaskType = 'one_time' AND CompletedAt IS NOT NULL AND DeleteAfter <= CAST(strftime('%s', 'now') AS INTEGER)")
+        rows = db.execute("SELECT Id, Unit, Name, Description, DueDate, NotifyShow FROM Tasks WHERE Active = 1 AND CompletedAt IS NULL AND NotifyMessage = 1 AND MessageSent = 0 AND date() >= NotifyDate").fetchall()
         for row in rows:
             try:
                 if notify_for_task(row):
@@ -331,6 +383,7 @@ def init() -> None:
     db.isolation_level = None
     db.row_factory = Row
     db_lock = Lock()
+    migrate_database()
     
     use_notify = bool(config["notify"]["usersEndpoint"]) and bool(config["notify"]["notifyEndpoint"]) and bool(config["notify"]["accesskey"])
     if not use_notify:
